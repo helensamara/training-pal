@@ -1,0 +1,18 @@
+# Environment / secrets
+.env
+*.env
+
+# Data files
+data/
+
+# Python
+.venv/
+venv/
+**/__pycache__/
+**/*.py[cod]
+
+# Editor / OS
+*~
+*.swp
+.DS_Store
+.~lock.*
