@@ -5,6 +5,9 @@
 # Data files
 data/
 
+# Playwright browser profile (stores login sessions)
+.browser_profile/
+
 # Python
 .venv/
 venv/
