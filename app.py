@@ -242,6 +242,23 @@ with tab_stats:
     st.markdown('#### Your Dataset')
     st.caption(f"📅 {df['date'].min().date()}  →  {df['date'].max().date()}")
 
+    st.markdown('---')
+    st.markdown('#### Sync Data')
+    if st.button('🔄  Sync from SugarWOD'):
+        import subprocess, sys
+        with st.spinner('Opening browser to sync SugarWOD data... (may take 2–3 min)'):
+            result = subprocess.run(
+                [sys.executable, 'scripts/sync_sugarwod.py'],
+                capture_output=True, text=True
+            )
+        if '✅' in result.stdout:
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.error('Sync failed or email not found.')
+            st.code(result.stdout + result.stderr)
+    st.markdown('---')
+
     col1, col2 = st.columns(2)
     col1.metric('Workouts', len(df))
     col2.metric('PRs', int(df['is_pr'].sum()))
