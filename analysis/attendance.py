@@ -129,12 +129,18 @@ def _annotate_gaps(ax, df, threshold_days=30):
 
 def summary(df):
     """Return dict of key attendance stats for agent use."""
-    _, monthly_stats = monthly_chart(df)
-    plt.close('all')
+    monthly = df.groupby('month').size()
+    avg      = monthly.mean()
+    best_pos  = int(monthly.values.argmax())
+    worst_pos = int(monthly.values.argmin())
     gaps = detect_gaps(df)
     return {
-        **monthly_stats,
-        'total_sessions': len(df),
-        'gaps_over_7d': gaps,
-        'date_range': f"{df['date'].min().date()} → {df['date'].max().date()}",
+        'avg_per_month':   round(float(avg), 1),
+        'best_month':      str(monthly.index[best_pos]),
+        'best_count':      int(monthly.iloc[best_pos]),
+        'worst_month':     str(monthly.index[worst_pos]),
+        'worst_count':     int(monthly.iloc[worst_pos]),
+        'total_sessions':  len(df),
+        'gaps_over_7d':    gaps,
+        'date_range':      f"{df['date'].min().date()} → {df['date'].max().date()}",
     }

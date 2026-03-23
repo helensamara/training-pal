@@ -2,6 +2,7 @@
 analysis/sentiment.py
 Sentiment scoring from workout notes + correlation with performance.
 """
+import re
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -14,23 +15,32 @@ PURPLE = '#8b5cf6'
 BLUE   = '#4a9eed'
 
 POSITIVE = [
-    'fun','love','loved','great','strong','good','amazing','awesome',
-    'happy','enjoy','enjoyed','solid','proud','unbroken','fast',
-    'better','improved','survived','nailed','bright side','thank','excited','pr'
+    'fun', 'love', 'loved', 'great', 'strong', 'good', 'amazing', 'awesome',
+    'happy', 'enjoy', 'enjoyed', 'solid', 'proud', 'unbroken', 'fast',
+    'better', 'improved', 'survived', 'nailed', 'bright side', 'thank',
+    'excited', 'personal record', 'new record', 'crushed', 'flew', 'flew through',
+    'felt good', 'felt great', 'felt strong', 'dialed in', 'on fire',
+    'consistent', 'smooth', 'clean', 'easy', 'motivated', 'energized',
 ]
 NEGATIVE = [
-    'hard','struggle','struggled','hurt','pain','tired','fatigued',
-    'slow','heavy','failed','miss','missed','sore','exhausted',
-    'killer','rough','difficult','bad','weak','dying','worst',
-    'challenging','humbling','sharp pain'
+    'hard', 'struggle', 'struggled', 'hurt', 'pain', 'tired', 'fatigued',
+    'slow', 'heavy', 'failed', 'miss', 'missed', 'sore', 'exhausted',
+    'rough', 'difficult', 'bad', 'weak', 'dying', 'worst',
+    'challenging', 'humbling', 'sharp pain', 'no show', 'burned out',
+    'off day', 'felt off', 'not feeling it', 'sluggish', 'drained',
+    'beat up', 'tweaked', 'tight', 'stiff', 'gassed', 'destroyed',
 ]
+
+# Pre-compiled regex patterns for whole-word matching
+_POS_PATTERNS = [re.compile(r'\b' + re.escape(w) + r'\b') for w in POSITIVE]
+_NEG_PATTERNS = [re.compile(r'\b' + re.escape(w) + r'\b') for w in NEGATIVE]
 
 
 def score_sentiment(text):
     """Score a single note -1 (negative) to +1 (positive). None if no signal."""
     t   = str(text).lower()
-    pos = sum(1 for w in POSITIVE if w in t)
-    neg = sum(1 for w in NEGATIVE if w in t)
+    pos = sum(1 for p in _POS_PATTERNS if p.search(t))
+    neg = sum(1 for p in _NEG_PATTERNS if p.search(t))
     if pos == 0 and neg == 0:
         return None
     return (pos - neg) / (pos + neg)
@@ -41,9 +51,9 @@ def enrich(df):
     df = df.copy()
     df['sentiment'] = df['notes'].apply(score_sentiment)
     df['pos_hits']  = df['notes'].str.lower().apply(
-        lambda t: [w for w in POSITIVE if w in t])
+        lambda t: [w for w, p in zip(POSITIVE, _POS_PATTERNS) if p.search(t)])
     df['neg_hits']  = df['notes'].str.lower().apply(
-        lambda t: [w for w in NEGATIVE if w in t])
+        lambda t: [w for w, p in zip(NEGATIVE, _NEG_PATTERNS) if p.search(t)])
     return df
 
 

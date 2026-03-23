@@ -81,15 +81,42 @@ def strength_progression(df, top_n=6):
 
 
 def lift_correlation(df):
-    """Heatmap of correlation between lifts. Returns fig."""
+    """Heatmap of correlation between lifts. Returns fig.
+
+    Uses running-max per lift sampled monthly, then forward-fills gaps.
+    Running max is monotonically non-decreasing so forward-fill is valid —
+    it simply says "my best is still X until I log a new session".
+    This gives every pair of lifts full overlap across the shared timeline,
+    producing a dense, meaningful correlation matrix.
+    Only lifts logged in at least 3 distinct months are kept.
+    """
     strength = df[(df['score_type'] == 'Load') & (df['barbell_lift'] != '')].copy()
     strength['load'] = pd.to_numeric(strength['best_result_raw'], errors='coerce')
-    pivot = strength.groupby(['date', 'barbell_lift'])['load'].max().unstack()
-    corr  = pivot.corr()
+    strength = strength[strength['load'].notna()].sort_values('date')
 
-    fig, ax = plt.subplots(figsize=(11, 9))
+    # Running max per lift (ever-increasing personal best)
+    strength['running_max'] = strength.groupby('barbell_lift')['load'].cummax()
+
+    # Monthly best-of-running-max, then forward-fill gaps
+    pivot = (
+        strength.groupby(['month', 'barbell_lift'])['running_max']
+        .max()
+        .unstack('barbell_lift')
+        .ffill()
+    )
+
+    # Keep lifts logged in at least 3 distinct months (before ffill)
+    lift_months = strength.groupby('barbell_lift')['month'].nunique()
+    keep = lift_months[lift_months >= 3].index
+    pivot = pivot[[c for c in pivot.columns if c in keep]]
+
+    corr = pivot.corr(min_periods=3)
+
+    fig, ax = plt.subplots(figsize=(max(8, len(corr)), max(7, len(corr) - 1)))
+    mask = np.zeros_like(corr, dtype=bool)
+    mask[np.triu_indices_from(mask, k=1)] = True
     sns.heatmap(corr, annot=True, fmt='.2f', cmap='RdYlGn', center=0,
-                ax=ax, square=True, linewidths=0.5,
+                ax=ax, square=True, linewidths=0.5, mask=mask,
                 annot_kws={'size': 9}, vmin=-1, vmax=1)
     ax.set_title('Which Lifts Improve Together?', fontsize=15, fontweight='bold', pad=15)
     plt.tight_layout()
@@ -209,14 +236,23 @@ def pr_timeline(df):
 
 def summary(df):
     """Return dict of key performance stats for agent use."""
-    total_rx   = (df['rx_or_scaled'] == 'RX').sum()
-    total_sc   = (df['rx_or_scaled'] == 'SCALED').sum()
-    _, sc_stats = scaling_ratio(df)
-    plt.close('all')
+    total_rx = (df['rx_or_scaled'] == 'RX').sum()
+    total_sc = (df['rx_or_scaled'] == 'SCALED').sum()
+
+    strength = df[(df['score_type'] == 'Load') & (df['barbell_lift'] != '')].copy()
+    strength['load'] = pd.to_numeric(strength['best_result_raw'], errors='coerce')
+    top_lifts = (
+        strength.groupby('barbell_lift')['load'].max()
+        .sort_values(ascending=False)
+        .head(5)
+        .round(1)
+        .to_dict()
+    )
+
     return {
-        'total_prs': int(df['is_pr'].sum()),
-        'rx_sessions': int(total_rx),
+        'total_prs':       int(df['is_pr'].sum()),
+        'rx_sessions':     int(total_rx),
         'scaled_sessions': int(total_sc),
-        'rx_rate_pct': round(total_rx / len(df) * 100, 1),
-        'scaling_ratio': sc_stats,
+        'rx_rate_pct':     round(total_rx / len(df) * 100, 1),
+        'top_lift_maxes':  top_lifts,
     }
