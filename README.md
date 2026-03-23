@@ -1,7 +1,6 @@
-# Performance Intelligence Agent
-### Capstone Project — Data Processing · Machine Learning · Generative AI
+# Training Pal
 
-A personal AI agent that analyses CrossFit training data from SugarWOD, surfaces patterns using machine learning, and lets me have a natural language conversation with your own data via Claude.
+A personal AI fitness coach for CrossFit + powerlifting. Ingests data from SugarWOD, Garmin Connect, and powerlifting program PDFs — runs ML analysis, and lets you chat with a Claude agent about your training via a mobile-first Streamlit UI.
 
 ---
 
@@ -9,9 +8,12 @@ A personal AI agent that analyses CrossFit training data from SugarWOD, surfaces
 
 | Component | What it covers |
 |-----------|---------------|
-| **Data Processing** | Cleans and normalises SugarWOD CSV exports. Visualises attendance, sentiment, and performance trends. |
-| **Machine Learning** | KMeans clustering (workout archetypes) · Isolation Forest (anomaly detection) · Linear Regression (PR forecasting) |
-| **Generative AI** | Claude (claude-sonnet) acts as a reasoning agent. It decides which analysis tools to call based on my question, interprets the results, and responds in natural language. |
+| **SugarWOD analysis** | Attendance consistency · sentiment from workout notes · RX rate · strength progression · lift correlations · PR forecasting · anomaly detection |
+| **Garmin integration** | Pulls HR, HRV, sleep, Body Battery, VO2 max, training load from Garmin Connect |
+| **Powerlifting programs** | Downloads program PDFs from Facebook Messenger, parses sets/reps/weight, matches sessions to program days |
+| **ML models** | KMeans clustering · per-lift rolling z-score anomaly detection · auto-selected regression (linear/log/sqrt) for PR forecasting |
+| **AI chat** | Claude (Sonnet 4.6) acts as a reasoning agent — picks which analysis tools to call, interprets results, responds in natural language |
+| **Mobile UI** | Streamlit app optimised for phone use (480px, sticky input, tabs: Chat / Charts / Stats) |
 
 ---
 
@@ -19,16 +21,23 @@ A personal AI agent that analyses CrossFit training data from SugarWOD, surfaces
 
 ```
 ├── data/
-│   └── workouts.csv          # SugarWOD export (not committed — add your own)
+│   ├── workouts.csv              # SugarWOD export (gitignored)
+│   ├── garmin.csv                # Garmin activities + biometrics (gitignored)
+│   └── powerlifting/             # program_YYYY-MM-DD.pdf files (gitignored)
 ├── analysis/
-│   ├── attendance.py         # Consistency, gaps, day-of-week patterns
-│   ├── sentiment.py          # Keyword scoring on workout notes
-│   ├── performance.py        # RX rate, strength progression, lift correlation
-│   └── ml_models.py          # Clustering, anomaly detection, PR forecasting
-├── loader.py                 # Data loading and cleaning
-├── tools.py                  # Agent tool definitions (wraps analysis modules)
-├── agent.py                  # Claude agent loop with tool use
-├── app.py                    # Streamlit chat interface
+│   ├── attendance.py             # Consistency, gaps, day-of-week patterns
+│   ├── sentiment.py              # Keyword scoring on workout notes
+│   ├── performance.py            # RX rate, strength progression, lift correlations
+│   ├── ml_models.py              # Clustering, anomaly detection, PR forecasting
+│   └── powerlifting.py           # PDF parsing + Garmin session matching
+├── scripts/
+│   ├── sync_sugarwod.py          # Playwright: SugarWOD export → data/workouts.csv
+│   ├── sync_garmin.py            # garminconnect: Garmin Connect → data/garmin.csv
+│   └── sync_powerlifting.py      # Playwright: Facebook Messenger PDFs → data/powerlifting/
+├── loader.py                     # Data loading and cleaning
+├── tools.py                      # Agent tool definitions (wraps analysis modules)
+├── agent.py                      # Claude agent loop with tool use
+├── app.py                        # Streamlit mobile-first UI
 └── requirements.txt
 ```
 
@@ -38,23 +47,50 @@ A personal AI agent that analyses CrossFit training data from SugarWOD, surfaces
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/helensamara/performance-intelligence-agent.git
-cd performance-intelligence-agent
+git clone <repo-url>
+cd training-pal
 
-# 2. Install dependencies
+# 2. Create virtual environment (required on Debian/Ubuntu)
+python3 -m venv venv
+source venv/bin/activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
+playwright install chromium
 
-# 3. Add your API key
-echo "ANTHROPIC_API_KEY=sk-your-key-here" > .env
-
-# 4. Add your data
-# Export workouts CSV from SugarWOD and place at data/workouts.csv
+# 4. Create .env with credentials
+ANTHROPIC_API_KEY=sk-...
+SUGARWOD_EMAIL=...
+SUGARWOD_PASSWORD=...
+GMAIL_PASSWORD=...          # Gmail App Password (not your main password)
+GARMIN_EMAIL=...
+GARMIN_PASSWORD=...
+FACEBOOK_EMAIL=...
+FACEBOOK_PASSWORD=...
 
 # 5. Run
 streamlit run app.py
 ```
 
-Then open **http://localhost:8501** in the browser.
+Open **http://localhost:8501** in your browser (or on your phone via your local IP).
+
+---
+
+## Data sync scripts
+
+```bash
+# Sync SugarWOD workouts
+python scripts/sync_sugarwod.py
+
+# Sync Garmin activities + biometrics
+python scripts/sync_garmin.py
+
+# Download powerlifting PDFs from Facebook Messenger
+# (opens a browser window — log in manually if asked, then press Enter)
+python scripts/sync_powerlifting.py
+```
+
+> **Note:** All sync scripts must be run in a real terminal (not piped), as they may need interactive input for login or CAPTCHA handling.
 
 ---
 
@@ -62,24 +98,28 @@ Then open **http://localhost:8501** in the browser.
 
 - *"How consistent have I been training?"*
 - *"When is my next PR likely for the Snatch?"*
+- *"How does my sleep affect my performance?"*
 - *"What do my workout notes reveal about how I feel?"*
 - *"Are there any unusual sessions worth looking at?"*
-- *"What are my training archetypes?"*
+- *"How am I tracking against my powerlifting program?"*
 
 ---
 
 ## Data
 
-This project uses my personal SugarWOD CSV export (initially, 367 workouts, Oct 2023 – Feb 2026).
-The data file is excluded from the repo for privacy. The project works with any SugarWOD export
-that includes the standard columns: `date, title, description, best_result_raw, best_result_display,
-score_type, barbell_lift, set_details, notes, rx_or_scaled, pr`.
+Personal data files are gitignored. The app works with:
+- **SugarWOD CSV** — standard export columns: `date, title, description, best_result_raw, best_result_display, score_type, barbell_lift, set_details, notes, rx_or_scaled, pr`
+- **Garmin CSV** — generated by `sync_garmin.py`
+- **Powerlifting PDFs** — 8-page programs (4 days × 2 weeks), named `program_YYYY-MM-DD.pdf`
 
 ---
 
 ## Roadmap
 
-- **Stage 2** — Add Garmin biometric data (HRV, sleep, heart rate)
-- **Stage 3** — Add powerlifting program (PDF extraction + actual logging)
-- **Stage 4** — Proactive alerts and weekly automated reports
-- **Stage 5** — YOLO video analysis of lifting form (separate project)
+- ✅ Mobile-first Streamlit UI (Chat / Charts / Stats tabs)
+- ✅ SugarWOD auto-sync (Playwright + Gmail IMAP)
+- ✅ Analysis improvements (lift correlations, anomaly detection, PR forecasting)
+- ✅ Powerlifting program sync + PDF parser + session matcher
+- 🔄 Garmin Connect sync — script ready, blocked by SSO rate limit
+- ⬜ Cross-data analysis — sleep vs performance, HR vs RX rate, menstrual cycle vs performance, Body Battery vs PR days
+- ⬜ Video form analysis (squat / deadlift / bench) — later
