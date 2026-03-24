@@ -104,7 +104,7 @@ def detect_gaps(df, threshold_days=7):
     gaps  = []
     for idx in diffs[diffs > threshold_days].index:
         gaps.append({
-            'start': unique_days.iloc[idx - 1].date(),
+            'start': str(unique_days.iloc[idx - 1].date()),
             'days':  int(diffs.iloc[idx])
         })
     return gaps

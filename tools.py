@@ -7,10 +7,13 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from loader import load_sugarwod
-from analysis import attendance, sentiment, performance, ml_models
+from loader import load_sugarwod, load_garmin_activities, load_garmin_daily
+from analysis import attendance, sentiment, performance, ml_models, garmin
 
-_df = None
+_df              = None
+_garmin_daily    = None
+_garmin_activities = None
+
 
 def _get_df():
     global _df
@@ -18,6 +21,20 @@ def _get_df():
         _df = load_sugarwod()
         _df = sentiment.enrich(_df)
     return _df
+
+
+def _get_garmin_daily():
+    global _garmin_daily
+    if _garmin_daily is None:
+        _garmin_daily = load_garmin_daily()
+    return _garmin_daily
+
+
+def _get_garmin_activities():
+    global _garmin_activities
+    if _garmin_activities is None:
+        _garmin_activities = load_garmin_activities()
+    return _garmin_activities
 
 
 def tool_attendance_summary():
@@ -87,6 +104,28 @@ TOOL_SCHEMAS = [
      'description': 'Use Linear Regression on lift progression curves to forecast when the next PR is likely per lift.',
      'input_schema': {'type': 'object', 'properties': {}, 'required': []}},
 ]
+
+
+def tool_garmin_summary():
+    """Cross-analysis of Garmin biometrics with SugarWOD performance."""
+    gd = _get_garmin_daily()
+    ga = _get_garmin_activities()
+    if gd.empty or ga.empty:
+        return {'error': 'Garmin data not found. Run scripts/parse_garmin_export.py first.'}
+    return garmin.summary(_get_df(), gd, ga)
+
+
+TOOLS['garmin_summary'] = tool_garmin_summary
+TOOL_SCHEMAS.append({
+    'name': 'garmin_summary',
+    'description': (
+        'Cross-analysis of Garmin biometric data with CrossFit performance. '
+        'Returns correlations between sleep score/duration and RX rate, '
+        'HRV vs performance, Body Battery drain per activity type, '
+        'and RX rate broken down by menstrual cycle phase.'
+    ),
+    'input_schema': {'type': 'object', 'properties': {}, 'required': []},
+})
 
 
 def run_tool(name, _input=None):

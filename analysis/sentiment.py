@@ -134,8 +134,8 @@ def sentiment_vs_performance(df):
 def summary(df):
     """Return dict of key sentiment stats for agent use."""
     has_sent = df[df['sentiment'].notna()]
-    top_pos  = has_sent.nlargest(3, 'sentiment')[['date','title','sentiment']].to_dict('records')
-    top_neg  = has_sent.nsmallest(3, 'sentiment')[['date','title','sentiment']].to_dict('records')
+    top_pos  = has_sent.nlargest(3, 'sentiment')[['date','title','sentiment']].assign(date=lambda d: d['date'].astype(str)).to_dict('records')
+    top_neg  = has_sent.nsmallest(3, 'sentiment')[['date','title','sentiment']].assign(date=lambda d: d['date'].astype(str)).to_dict('records')
     _, r = sentiment_vs_performance(df)
     plt.close('all')
     return {

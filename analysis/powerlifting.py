@@ -57,52 +57,80 @@ SCHEDULE = {
 # ── PDF Parsing ────────────────────────────────────────────────────
 
 def _parse_sets(text):
-    """Extract sets/reps/weight/percentage lines from page text."""
+    """
+    Parse sets from a PDF page.
+
+    Tom's programs use an Excel-exported spreadsheet format:
+        LiftName  Reps  Sets  Volume  Details
+        30        5     1     150     Paused
+        55        2     3     330
+        1377.5    12    Sets          ← total row, skip
+
+    Verified: volume == weight * reps * sets (within 1% rounding tolerance).
+    """
     exercises = []
-    current = None
+    current   = None
 
     for line in text.split('\n'):
         line = line.strip()
         if not line:
             continue
 
-        # New exercise header (e.g. "Squat", "Bench Press", "Deadlift", "RDL")
-        if re.match(r'^[A-Z][a-zA-Z\s]+$', line) and len(line) < 40 and not re.search(r'\d', line):
+        # Skip page header "Week X - Day Y"
+        if re.match(r'^Week\s+\d', line, re.IGNORECASE):
+            continue
+
+        # Lift header: "Bench Reps Sets Volume Details"
+        # The lift name is everything before "Reps Sets Volume"
+        header = re.match(r'^([A-Za-z][A-Za-z\s\-/]+?)\s+Reps\s+Sets\s+Volume', line, re.IGNORECASE)
+        if header:
             if current:
                 exercises.append(current)
-            current = {'name': line, 'sets': []}
+            lift_name = header.group(1).strip()
+            # Normalise common variants
+            name_lower = lift_name.lower()
+            if 'deadlift' in name_lower:
+                lift_name = 'Deadlift'
+            elif 'squat' in name_lower:
+                lift_name = 'Squat'
+            elif 'bench' in name_lower:
+                lift_name = 'Bench'
+            current = {'name': lift_name, 'sets': []}
             continue
 
         if current is None:
             continue
 
-        # Set line patterns: "3x5 @ 80%", "4 sets x 3 reps @ 85%", "5 reps @ 100kg", "3x5 @80% (185lbs)"
-        set_match = re.search(
-            r'(\d+)\s*[xX×]\s*(\d+)'       # sets x reps
-            r'(?:\s*[@at]+\s*(\d+(?:\.\d+)?)\s*(%|kg|lbs?))?'  # optional weight
-            r'(?:.*?(\d+(?:\.\d+)?)\s*(lbs?|kg))?',  # optional explicit weight
-            line, re.IGNORECASE
-        )
-        if set_match:
-            sets, reps = int(set_match.group(1)), int(set_match.group(2))
-            pct   = float(set_match.group(3)) if set_match.group(3) and set_match.group(4) == '%' else None
-            wt    = float(set_match.group(3)) if set_match.group(3) and set_match.group(4) in ('kg','lbs','lbs') else None
-            if not wt and set_match.group(5):
-                wt = float(set_match.group(5))
-            current['sets'].append({'sets': sets, 'reps': reps, 'pct': pct, 'weight': wt, 'raw': line})
+        # Total/summary row: ends with "Sets" (e.g. "1377.5  12  Sets")
+        if re.search(r'\bSets\s*$', line, re.IGNORECASE):
+            continue
 
-        # RPE lines: "3x3 @RPE 8"
-        rpe_match = re.search(r'(\d+)\s*[xX×]\s*(\d+)\s*@?\s*RPE\s*(\d+(?:\.\d+)?)', line, re.IGNORECASE)
-        if rpe_match:
-            current['sets'].append({
-                'sets': int(rpe_match.group(1)), 'reps': int(rpe_match.group(2)),
-                'rpe': float(rpe_match.group(3)), 'raw': line
-            })
+        # Data row: weight  reps  sets  volume  [details]
+        parts = line.split()
+        if len(parts) >= 4:
+            try:
+                weight = float(parts[0])
+                reps   = int(parts[1])
+                sets   = int(parts[2])
+                volume = float(parts[3])
+                details = ' '.join(parts[4:]) if len(parts) > 4 else ''
 
-        # Percentage-only lines: "@80%"
-        pct_only = re.search(r'@\s*(\d+(?:\.\d+)?)\s*%', line)
-        if pct_only and current['sets']:
-            current['sets'][-1]['pct'] = float(pct_only.group(1))
+                # Sanity: volume ≈ weight × reps × sets (allow small rounding)
+                expected = weight * reps * sets
+                if (expected > 0
+                        and abs(volume - expected) / expected < 0.02
+                        and 5 < weight < 500
+                        and 1 <= reps <= 30
+                        and 1 <= sets <= 15):
+                    current['sets'].append({
+                        'weight':  weight,
+                        'reps':    reps,
+                        'sets':    sets,
+                        'volume':  volume,
+                        'details': details,
+                    })
+            except (ValueError, ZeroDivisionError):
+                pass
 
     if current:
         exercises.append(current)
@@ -267,6 +295,173 @@ def program_adherence_chart(garmin_df):
                label=f"Avg: {counts['actual'].mean():.1f} sessions")
     ax.set_title('Powerlifting Program Adherence', fontsize=15, fontweight='bold', pad=15)
     ax.set_ylabel('Sessions per 2-week block')
+    ax.legend()
+    plt.tight_layout()
+    return fig
+
+
+def _extract_program_maxes():
+    """
+    For each program, extract the max prescribed weight per lift (Bench, Squat, Deadlift).
+    Returns a DataFrame with columns: program_date, lift, max_weight, total_volume.
+    """
+    programs = load_all_programs()
+    rows = []
+    for p in programs:
+        prog_date = pd.to_datetime(p['program_date'])
+        lift_maxes  = {'Bench': 0, 'Squat': 0, 'Deadlift': 0}
+        lift_volume = {'Bench': 0, 'Squat': 0, 'Deadlift': 0}
+        for week, days in p['weeks'].items():
+            for day, exercises in days.items():
+                for ex in exercises:
+                    name = ex['name']
+                    if name not in lift_maxes or not ex['sets']:
+                        continue
+                    for s in ex['sets']:
+                        lift_maxes[name]  = max(lift_maxes[name], s['weight'])
+                        lift_volume[name] += s['volume']
+        for lift in ['Bench', 'Squat', 'Deadlift']:
+            if lift_maxes[lift] > 0:
+                rows.append({
+                    'program_date': prog_date,
+                    'lift':         lift,
+                    'max_weight':   lift_maxes[lift],
+                    'total_volume': lift_volume[lift],
+                })
+    return pd.DataFrame(rows)
+
+
+def strength_progression_chart(sugarwod_df=None):
+    """
+    Three-panel chart showing programmed max weight progression for
+    Bench, Squat, and Deadlift across all 18 programs.
+    Overlays actual PRs logged in SugarWOD where available.
+    """
+    program_maxes = _extract_program_maxes()
+    if program_maxes.empty:
+        return None
+
+    lift_colors = {'Bench': BLUE, 'Squat': GREEN, 'Deadlift': RED}
+    lift_sugarwod_names = {
+        'Bench':    ['Bench Press', 'Bench'],
+        'Squat':    ['Back Squat', 'Squat'],
+        'Deadlift': ['Deadlift'],
+    }
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+    fig.suptitle('Powerlifting Strength Progression — Programmed Weights', fontsize=15, fontweight='bold')
+
+    for ax, lift in zip(axes, ['Bench', 'Squat', 'Deadlift']):
+        color = lift_colors[lift]
+        ldf   = program_maxes[program_maxes['lift'] == lift].sort_values('program_date')
+
+        # Programmed max line
+        ax.plot(ldf['program_date'], ldf['max_weight'],
+                color=color, linewidth=2.5, marker='o', markersize=6,
+                label='Programmed max')
+        ax.fill_between(ldf['program_date'], ldf['max_weight'],
+                        alpha=0.1, color=color)
+
+        # SugarWOD CrossFit overlay (separate sport — different PRs, lighter loads, different gear)
+        # SugarWOD stores loads in lbs — convert to kg for comparison with PDF weights
+        # NOTE: SugarWOD = CrossFit PRs only. Powerlifting PRs are higher (different gear, context, rules).
+        LBS_TO_KG = 0.453592
+        if sugarwod_df is not None and not sugarwod_df.empty:
+            sw = sugarwod_df.copy()
+            sw['date'] = pd.to_datetime(sw['date'])
+            sw_names = lift_sugarwod_names[lift]
+            sw_lift  = sw[sw['barbell_lift'].isin(sw_names) & sw['score_load'].notna()].copy()
+            if not sw_lift.empty:
+                sw_lift['score_kg'] = sw_lift['score_load'] * LBS_TO_KG
+                ax.scatter(sw_lift['date'], sw_lift['score_kg'],
+                           color=color, alpha=0.35, s=30, zorder=3,
+                           label='CrossFit sessions (lbs→kg)')
+                prs = sw_lift[sw_lift['is_pr']]
+                if not prs.empty:
+                    ax.scatter(prs['date'], prs['score_kg'],
+                               color='gold', edgecolors=color, linewidths=1.5,
+                               s=100, zorder=5, marker='D', label='CrossFit PR')
+                    for _, row in prs.iterrows():
+                        ax.annotate(f"{row['score_kg']:.0f}kg",
+                                    (row['date'], row['score_kg']),
+                                    textcoords='offset points', xytext=(4, 6),
+                                    fontsize=7.5, color=color, fontweight='bold')
+
+        ax.set_title(lift, fontsize=13, fontweight='bold', color=color)
+        ax.set_ylabel('Weight (kg)')
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %y'))
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+        ax.legend(fontsize=7.5)
+
+    plt.tight_layout()
+    return fig
+
+
+def training_frequency_chart(garmin_activities_df):
+    """
+    Weekly CrossFit + Powerlifting session count from Garmin data.
+    Shows the combined training load over time.
+    """
+    if garmin_activities_df is None or garmin_activities_df.empty:
+        return None
+
+    df = garmin_activities_df.copy()
+    df['date'] = pd.to_datetime(df['date'])
+    df = df[df['activity_category'].isin(['crossfit', 'powerlifting'])]
+    df['week'] = df['date'].dt.to_period('W').dt.start_time
+
+    weekly = (df.groupby(['week', 'activity_category'])
+                .size()
+                .unstack(fill_value=0)
+                .reset_index())
+
+    if 'crossfit' not in weekly.columns:
+        weekly['crossfit'] = 0
+    if 'powerlifting' not in weekly.columns:
+        weekly['powerlifting'] = 0
+
+    weekly['total'] = weekly['crossfit'] + weekly['powerlifting']
+    weekly['rolling_total'] = weekly['total'].rolling(4, min_periods=1).mean()
+
+    fig, ax = plt.subplots(figsize=(14, 5))
+    ax.bar(weekly['week'], weekly['crossfit'],    width=5, color=RED,    alpha=0.8, label='CrossFit')
+    ax.bar(weekly['week'], weekly['powerlifting'], width=5, color=PURPLE, alpha=0.8,
+           bottom=weekly['crossfit'], label='Powerlifting')
+    ax.plot(weekly['week'], weekly['rolling_total'], color=AMBER, linewidth=2,
+            label=f"4-week avg: {weekly['total'].mean():.1f} sessions/week")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %y'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+    ax.set_ylabel('Sessions per week')
+    ax.set_title('Weekly Training Frequency — CrossFit + Powerlifting', fontsize=14, fontweight='bold')
+    ax.legend()
+    plt.tight_layout()
+    return fig
+
+
+def volume_progression_chart():
+    """
+    Total prescribed training volume per lift per program.
+    Shows how training load has been periodised over time.
+    """
+    program_maxes = _extract_program_maxes()
+    if program_maxes.empty:
+        return None
+
+    lift_colors = {'Bench': BLUE, 'Squat': GREEN, 'Deadlift': RED}
+    fig, ax = plt.subplots(figsize=(14, 5))
+
+    for lift, color in lift_colors.items():
+        ldf = program_maxes[program_maxes['lift'] == lift].sort_values('program_date')
+        ax.plot(ldf['program_date'], ldf['total_volume'] / 1000,
+                color=color, linewidth=2, marker='o', markersize=5, label=lift)
+
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %y'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+    ax.set_ylabel('Total Prescribed Volume (tonnes)')
+    ax.set_title('Programmed Volume per Lift Over Time', fontsize=14, fontweight='bold')
     ax.legend()
     plt.tight_layout()
     return fig

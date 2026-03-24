@@ -82,3 +82,33 @@ def load_sugarwod(path=None):
     df['score_amrap_reps']   = pd.to_numeric(df['score_amrap_reps'],   errors='coerce')
 
     return df
+
+
+def load_garmin_activities(path=None):
+    """
+    Load garmin_activities.csv produced by scripts/parse_garmin_export.py.
+    One row per Garmin activity (CrossFit, powerlifting, walking, etc.).
+    Returns empty DataFrame if file not found.
+    """
+    if path is None:
+        path = os.path.join(DATA_DIR, 'garmin_activities.csv')
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    df = pd.read_csv(path, parse_dates=['date'])
+    df['date'] = df['date'].dt.normalize()
+    return df
+
+
+def load_garmin_daily(path=None):
+    """
+    Load garmin_daily.csv produced by scripts/parse_garmin_export.py.
+    One row per calendar day with sleep, HRV, resting HR, menstrual phase.
+    Returns empty DataFrame if file not found.
+    """
+    if path is None:
+        path = os.path.join(DATA_DIR, 'garmin_daily.csv')
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    df = pd.read_csv(path, parse_dates=['date'])
+    df['date'] = df['date'].dt.normalize()
+    return df

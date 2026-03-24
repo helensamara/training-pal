@@ -7,8 +7,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from loader import load_sugarwod
-from analysis import attendance, sentiment, performance, ml_models
+from loader import load_sugarwod, load_garmin_activities, load_garmin_daily
+from analysis import attendance, sentiment, performance, ml_models, garmin, powerlifting
 from agent import chat
 
 st.set_page_config(
@@ -109,11 +109,18 @@ def get_data():
     df = sentiment.enrich(df)
     return df
 
+@st.cache_data
+def get_garmin():
+    return load_garmin_activities(), load_garmin_daily()
+
 try:
     df = get_data()
 except Exception as e:
     st.error(f'Could not load data/workouts.csv: {e}')
     st.stop()
+
+ga, gd = get_garmin()
+has_garmin = not ga.empty and not gd.empty
 
 # ── Tabs ───────────────────────────────────────────────────────────
 tab_chat, tab_charts, tab_stats = st.tabs(['💬  Chat', '📊  Charts', '📋  Stats'])
@@ -188,6 +195,15 @@ with tab_charts:
         ('🤖  Workout Clusters',  'clusters'),
         ('🔮  PR Forecast',       'forecast'),
         ('⚠️  Anomalies',         'anomalies'),
+        ('😴  Sleep vs Performance',  'sleep_perf'),
+        ('💓  HRV vs Performance',    'hrv_perf'),
+        ('🔋  Body Battery',          'body_battery'),
+        ('🔴  HR Zones',              'hr_zones'),
+        ('📆  Weekly Load',           'weekly_load'),
+        ('🌙  Cycle vs Performance',  'cycle_perf'),
+        ('🏋️  Strength Progression',  'pl_strength'),
+        ('📋  Training Frequency',    'pl_frequency'),
+        ('📦  Program Volume',        'pl_volume'),
     ]
 
     for label, key in chart_options:
@@ -232,6 +248,75 @@ with tab_charts:
             elif chart == 'anomalies':
                 _, fig = ml_models.detect_anomalies(df)
                 st.pyplot(fig, use_container_width=True); plt.close(fig)
+            elif chart == 'sleep_perf':
+                if not has_garmin:
+                    st.info('Garmin data not loaded.')
+                else:
+                    fig = garmin.sleep_vs_performance(df, gd)
+                    if fig:
+                        st.pyplot(fig, use_container_width=True); plt.close(fig)
+                    else:
+                        st.info('Not enough sleep data to plot.')
+            elif chart == 'hrv_perf':
+                if not has_garmin:
+                    st.info('Garmin data not loaded.')
+                else:
+                    fig = garmin.hrv_vs_performance(df, gd)
+                    if fig:
+                        st.pyplot(fig, use_container_width=True); plt.close(fig)
+                    else:
+                        st.info('Not enough HRV data to plot.')
+            elif chart == 'body_battery':
+                if not has_garmin:
+                    st.info('Garmin data not loaded.')
+                else:
+                    fig = garmin.body_battery_chart(ga)
+                    if fig:
+                        st.pyplot(fig, use_container_width=True); plt.close(fig)
+            elif chart == 'hr_zones':
+                if not has_garmin:
+                    st.info('Garmin data not loaded.')
+                else:
+                    fig = garmin.hr_zones_chart(ga)
+                    if fig:
+                        st.pyplot(fig, use_container_width=True); plt.close(fig)
+            elif chart == 'weekly_load':
+                if not has_garmin:
+                    st.info('Garmin data not loaded.')
+                else:
+                    fig = garmin.weekly_load_chart(ga)
+                    if fig:
+                        st.pyplot(fig, use_container_width=True); plt.close(fig)
+            elif chart == 'cycle_perf':
+                if not has_garmin:
+                    st.info('Garmin data not loaded.')
+                else:
+                    fig = garmin.menstrual_vs_performance(df, gd)
+                    if fig:
+                        st.pyplot(fig, use_container_width=True); plt.close(fig)
+                    else:
+                        st.info('Not enough cycle data to plot.')
+            elif chart == 'pl_strength':
+                fig = powerlifting.strength_progression_chart(df)
+                if fig:
+                    st.pyplot(fig, use_container_width=True); plt.close(fig)
+                    st.caption('Programmed max = heaviest set prescribed by coach Tom Kean. SugarWOD points are CrossFit sessions only (converted from lbs to kg).')
+                else:
+                    st.info('No powerlifting program data found.')
+            elif chart == 'pl_frequency':
+                if not has_garmin:
+                    st.info('Garmin data not loaded.')
+                else:
+                    fig = powerlifting.training_frequency_chart(ga)
+                    if fig:
+                        st.pyplot(fig, use_container_width=True); plt.close(fig)
+            elif chart == 'pl_volume':
+                fig = powerlifting.volume_progression_chart()
+                if fig:
+                    st.pyplot(fig, use_container_width=True); plt.close(fig)
+                    st.caption('Total prescribed training volume per lift across all 8 pages of each program.')
+                else:
+                    st.info('No powerlifting program data found.')
         except Exception as e:
             st.error(f'Chart error: {e}')
 
@@ -244,6 +329,7 @@ with tab_stats:
 
     st.markdown('---')
     st.markdown('#### Sync Data')
+
     if st.button('🔄  Sync from SugarWOD'):
         import subprocess, sys
         with st.spinner('Opening browser to sync SugarWOD data... (may take 2–3 min)'):
@@ -257,6 +343,36 @@ with tab_stats:
         else:
             st.error('Sync failed or email not found.')
             st.code(result.stdout + result.stderr)
+
+    if st.button('🏋️  Sync Powerlifting PDFs'):
+        import subprocess, sys
+        st.info('Opening browser — log in to Facebook if prompted, then follow the terminal prompts.')
+        result = subprocess.run(
+            [sys.executable, 'scripts/sync_powerlifting.py'],
+            capture_output=True, text=True
+        )
+        if '✅' in result.stdout:
+            st.success(result.stdout.split('✅')[-1].strip())
+        else:
+            st.warning('Sync complete — check terminal output for details.')
+            st.code(result.stdout + result.stderr)
+
+    st.markdown('**Garmin data** — export manually from [garmin.com → Account → Export Data](https://www.garmin.com/en-US/account/datamanagement/exportdata), download the ZIP, extract it into `data/garmin/`, then click:')
+    if st.button('📡  Re-parse Garmin Export'):
+        import subprocess, sys
+        with st.spinner('Parsing Garmin export...'):
+            result = subprocess.run(
+                [sys.executable, 'scripts/parse_garmin_export.py'],
+                capture_output=True, text=True
+            )
+        if '✅' in result.stdout:
+            st.cache_data.clear()
+            st.success('Garmin data updated!')
+            st.rerun()
+        else:
+            st.error('Parse failed — is the export ZIP extracted into data/garmin/?')
+            st.code(result.stdout + result.stderr)
+
     st.markdown('---')
 
     col1, col2 = st.columns(2)
