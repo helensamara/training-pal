@@ -258,13 +258,37 @@ def summary(garmin_df=None):
     out = {
         'total_programs': len(programs),
         'date_range': f"{programs[0]['program_date']} → {programs[-1]['program_date']}",
-        'programs': [p['program_date'] for p in programs],
     }
+
+    # Max weight and volume progression per lift
+    maxes = _extract_program_maxes()
+    if not maxes.empty:
+        progression = {}
+        for lift in ['Bench', 'Squat', 'Deadlift']:
+            ldf = maxes[maxes['lift'] == lift].sort_values('program_date')
+            if ldf.empty:
+                continue
+            first = ldf.iloc[0]
+            last  = ldf.iloc[-1]
+            progression[lift] = {
+                'first_program_date':    str(first['program_date'].date()),
+                'first_max_kg':          round(first['max_weight'], 1),
+                'latest_program_date':   str(last['program_date'].date()),
+                'latest_max_kg':         round(last['max_weight'], 1),
+                'total_gain_kg':         round(last['max_weight'] - first['max_weight'], 1),
+                'programs_with_data':    len(ldf),
+                'latest_total_volume_kg': round(float(last['total_volume']), 1),
+                'history': [
+                    {'date': str(r['program_date'].date()), 'max_kg': round(r['max_weight'], 1)}
+                    for _, r in ldf.iterrows()
+                ],
+            }
+        out['lift_progression'] = progression
 
     if garmin_df is not None and not garmin_df.empty:
         matched = match_garmin_to_program(garmin_df, programs)
         pl_sessions = matched[matched['pl_program_date'].notna()]
-        out['pl_sessions_tracked'] = len(pl_sessions)
+        out['pl_sessions_tracked'] = int(len(pl_sessions))
 
     return out
 

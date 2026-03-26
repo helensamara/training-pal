@@ -35,6 +35,9 @@ Tools available:
 - forecast_prs         → Linear Regression predicts next PR per lift
 - garmin_summary       → sleep vs performance, HRV vs performance, Body Battery drain,
                           menstrual cycle phase vs RX rate (Nov 2024 – Mar 2026 window)
+- powerlifting_summary → max prescribed weight + volume progression for Bench/Squat/Deadlift
+                          across 18 programs from coach Tom Kean (Sep 2024 – Mar 2026).
+                          Use this for ANY powerlifting question — never use SugarWOD data for PL lifts.
 
 Rules:
 1. Always call the relevant tool(s) before responding — never guess figures.
@@ -65,9 +68,19 @@ def chat(messages: list) -> tuple[str, list]:
         )
 
         if response.stop_reason == 'tool_use':
+            # Convert SDK objects to plain dicts so history survives Streamlit session state
+            assistant_content = []
             tool_results = []
             for block in response.content:
-                if block.type == 'tool_use':
+                if block.type == 'text':
+                    assistant_content.append({'type': 'text', 'text': block.text})
+                elif block.type == 'tool_use':
+                    assistant_content.append({
+                        'type': 'tool_use',
+                        'id': block.id,
+                        'name': block.name,
+                        'input': block.input,
+                    })
                     result = run_tool(block.name, block.input)
                     tool_results.append({
                         'type': 'tool_result',
@@ -75,7 +88,7 @@ def chat(messages: list) -> tuple[str, list]:
                         'content': json.dumps(result),
                     })
             messages = messages + [
-                {'role': 'assistant', 'content': response.content},
+                {'role': 'assistant', 'content': assistant_content},
                 {'role': 'user',      'content': tool_results},
             ]
         else:

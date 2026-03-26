@@ -8,7 +8,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from loader import load_sugarwod, load_garmin_activities, load_garmin_daily
-from analysis import attendance, sentiment, performance, ml_models, garmin
+from analysis import attendance, sentiment, performance, ml_models, garmin, powerlifting
 
 _df              = None
 _garmin_daily    = None
@@ -123,6 +123,26 @@ TOOL_SCHEMAS.append({
         'Returns correlations between sleep score/duration and RX rate, '
         'HRV vs performance, Body Battery drain per activity type, '
         'and RX rate broken down by menstrual cycle phase.'
+    ),
+    'input_schema': {'type': 'object', 'properties': {}, 'required': []},
+})
+
+
+def tool_powerlifting_summary():
+    """Powerlifting program stats: lift progression (Bench/Squat/Deadlift) across all programs."""
+    ga = _get_garmin_activities()
+    return powerlifting.summary(garmin_df=ga if not ga.empty else None)
+
+
+TOOLS['powerlifting_summary'] = tool_powerlifting_summary
+TOOL_SCHEMAS.append({
+    'name': 'powerlifting_summary',
+    'description': (
+        'Powerlifting program analysis. Returns max prescribed weight progression for '
+        'Bench, Squat, and Deadlift across all 18 programs from coach Tom Kean '
+        '(Sep 2024 – Mar 2026), including total gains in kg, volume per program, '
+        'and full history per lift. Use this for ANY question about powerlifting '
+        'strength, programs, or progress — completely separate from CrossFit data.'
     ),
     'input_schema': {'type': 'object', 'properties': {}, 'required': []},
 })
