@@ -9,8 +9,8 @@ A personal AI fitness coach for CrossFit + powerlifting. Ingests data from Sugar
 | Component | What it covers |
 |-----------|---------------|
 | **SugarWOD analysis** | Attendance consistency · sentiment from workout notes · RX rate · strength progression · lift correlations · PR forecasting · anomaly detection |
-| **Garmin integration** | Pulls HR, HRV, sleep, Body Battery, VO2 max, training load from Garmin Connect |
-| **Powerlifting programs** | Downloads program PDFs from Facebook Messenger, parses sets/reps/weight, matches sessions to program days |
+| **Garmin cross-analysis** | Sleep vs performance · HRV vs RX rate · menstrual cycle vs performance · Body Battery drain · HR zones · weekly training load |
+| **Powerlifting programs** | Downloads program PDFs from Facebook Messenger, parses sets/reps/weight, charts strength progression (Bench / Squat / Deadlift) over time |
 | **ML models** | KMeans clustering · per-lift rolling z-score anomaly detection · auto-selected regression (linear/log/sqrt) for PR forecasting |
 | **AI chat** | Claude (Sonnet 4.6) acts as a reasoning agent — picks which analysis tools to call, interprets results, responds in natural language |
 | **Mobile UI** | Streamlit app optimised for phone use (480px, sticky input, tabs: Chat / Charts / Stats) |
@@ -21,23 +21,26 @@ A personal AI fitness coach for CrossFit + powerlifting. Ingests data from Sugar
 
 ```
 ├── data/
-│   ├── workouts.csv              # SugarWOD export (gitignored)
-│   ├── garmin.csv                # Garmin activities + biometrics (gitignored)
-│   └── powerlifting/             # program_YYYY-MM-DD.pdf files (gitignored)
+│   ├── workouts.csv              # SugarWOD export — 381 CrossFit sessions (gitignored)
+│   ├── garmin_activities.csv     # 382 Garmin activities, Nov 2024 → present (gitignored)
+│   ├── garmin_daily.csv          # 505 days: sleep, HRV, resting HR, SpO2, menstrual phase (gitignored)
+│   └── powerlifting/             # program_YYYY-MM-DD.pdf — 18 programs (gitignored)
 ├── analysis/
 │   ├── attendance.py             # Consistency, gaps, day-of-week patterns
 │   ├── sentiment.py              # Keyword scoring on workout notes
 │   ├── performance.py            # RX rate, strength progression, lift correlations
 │   ├── ml_models.py              # Clustering, anomaly detection, PR forecasting
-│   └── powerlifting.py           # PDF parsing + Garmin session matching
+│   ├── garmin.py                 # Garmin biometrics cross-analysis
+│   └── powerlifting.py           # PDF parsing, strength progression, volume charts
 ├── scripts/
 │   ├── sync_sugarwod.py          # Playwright: SugarWOD export → data/workouts.csv
-│   ├── sync_garmin.py            # garminconnect: Garmin Connect → data/garmin.csv
+│   ├── sync_garmin.py            # garminconnect: Garmin Connect (SSO rate-limited)
+│   ├── parse_garmin_export.py    # Parses manual Garmin export ZIP → garmin_*.csv
 │   └── sync_powerlifting.py      # Playwright: Facebook Messenger PDFs → data/powerlifting/
 ├── loader.py                     # Data loading and cleaning
 ├── tools.py                      # Agent tool definitions (wraps analysis modules)
 ├── agent.py                      # Claude agent loop with tool use
-├── app.py                        # Streamlit mobile-first UI
+├── app.py                        # Streamlit mobile-first UI (17 charts, 3 sync buttons)
 └── requirements.txt
 ```
 
@@ -76,21 +79,29 @@ Open **http://localhost:8501** in your browser (or on your phone via your local 
 
 ---
 
-## Data sync scripts
+## Data sync
 
+### SugarWOD
 ```bash
-# Sync SugarWOD workouts
 python scripts/sync_sugarwod.py
+```
+Or use the **Sync SugarWOD** button in the Stats tab.
 
-# Sync Garmin activities + biometrics
-python scripts/sync_garmin.py
+### Garmin Connect
+Garmin's SSO blocks automated logins. Use the manual export instead:
+1. Go to [garmin.com/account/datamanagement/exportdata](https://www.garmin.com/en-US/account/datamanagement/exportdata)
+2. Click **Request Data Export** — you'll receive a download link by email
+3. Download the ZIP and place it in the project root
+4. Run: `python scripts/parse_garmin_export.py`
 
-# Download powerlifting PDFs from Facebook Messenger
-# (opens a browser window — log in manually if asked, then press Enter)
+Or use the **Re-parse Garmin Export** button in the Stats tab.
+
+### Powerlifting PDFs
+```bash
+# Opens a browser window — log in manually if asked, then press Enter
 python scripts/sync_powerlifting.py
 ```
-
-> **Note:** All sync scripts must be run in a real terminal (not piped), as they may need interactive input for login or CAPTCHA handling.
+Downloads all program PDFs from the coach's Messenger chat, extracts dates from PDF metadata, saves as `data/powerlifting/program_YYYY-MM-DD.pdf`.
 
 ---
 
@@ -101,16 +112,27 @@ python scripts/sync_powerlifting.py
 - *"How does my sleep affect my performance?"*
 - *"What do my workout notes reveal about how I feel?"*
 - *"Are there any unusual sessions worth looking at?"*
-- *"How am I tracking against my powerlifting program?"*
+- *"How am I progressing on bench, squat and deadlift?"*
 
 ---
 
-## Data
+## Agent tools
 
-Personal data files are gitignored. The app works with:
-- **SugarWOD CSV** — standard export columns: `date, title, description, best_result_raw, best_result_display, score_type, barbell_lift, set_details, notes, rx_or_scaled, pr`
-- **Garmin CSV** — generated by `sync_garmin.py`
-- **Powerlifting PDFs** — 8-page programs (4 days × 2 weeks), named `program_YYYY-MM-DD.pdf`
+The Claude agent has 7 tools — it decides which to call based on your question:
+
+1. `attendance_summary` — sessions/month, gaps, consistency trends
+2. `sentiment_summary` — mood scores from workout notes
+3. `performance_summary` — RX rate, PR count, strength progression
+4. `cluster_workouts` — KMeans workout archetypes
+5. `detect_anomalies` — flags unusual strength sessions
+6. `forecast_prs` — predicts next PR per lift
+7. `garmin_summary` — sleep, HRV, menstrual cycle vs performance
+
+---
+
+## CrossFit vs Powerlifting
+
+CrossFit and powerlifting are tracked as **completely separate sports** with different gear, different PRs, and different standards. SugarWOD data contains CrossFit only. Powerlifting PRs (from the program PDFs) are always higher — e.g. deadlift CrossFit PR ~230–250 lbs vs powerlifting PR 300+ lbs. The agent is instructed never to conflate them.
 
 ---
 
@@ -119,7 +141,8 @@ Personal data files are gitignored. The app works with:
 - ✅ Mobile-first Streamlit UI (Chat / Charts / Stats tabs)
 - ✅ SugarWOD auto-sync (Playwright + Gmail IMAP)
 - ✅ Analysis improvements (lift correlations, anomaly detection, PR forecasting)
-- ✅ Powerlifting program sync + PDF parser + session matcher
-- 🔄 Garmin Connect sync — script ready, blocked by SSO rate limit
-- ⬜ Cross-data analysis — sleep vs performance, HR vs RX rate, menstrual cycle vs performance, Body Battery vs PR days
-- ⬜ Video form analysis (squat / deadlift / bench) — later
+- ✅ Powerlifting program sync + PDF parser + strength progression charts
+- ✅ Garmin Connect integration (manual export + parser)
+- ✅ Cross-data analysis — sleep / HRV / menstrual cycle vs performance, Body Battery, HR zones
+- ⬜ Automate Garmin data refresh (Playwright export request + IMAP download)
+- ⬜ Video form analysis (squat / deadlift / bench)
