@@ -1,3 +1,7 @@
+Training Pal is a personal AI fitness coach I built to solve a real problem: I train CrossFit and powerlifting simultaneously and track data across three disconnected platforms — SugarWOD, Garmin Connect, and PDF programs from my coach via Facebook Messenger. No tool connected these sources or helped me reason across them. Training Pal ingests all three, runs ML analysis (clustering, anomaly detection, PR forecasting), and lets you ask questions in natural language through a Claude agent with tool use. Built on real personal data: 381 CrossFit sessions, 505 days of Garmin biometrics, 18 powerlifting program PDFs.
+
+---
+
 # Training Pal
 
 A personal AI fitness coach for CrossFit + powerlifting. Ingests data from SugarWOD, Garmin Connect, and powerlifting program PDFs — runs ML analysis, and lets you chat with a Claude agent about your training via a mobile-first Streamlit UI.
